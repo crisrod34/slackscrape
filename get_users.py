@@ -1,9 +1,13 @@
-#!/usr/bin/env python
-from json_utils import load_json, dump_json
-from slackclient import SlackClient
-import operator
 import os
-import argparse
+import logging
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from json_utils import load_json, dump_json
+
+config = load_json('./env.json')
+
+client = WebClient(token=config['token'])
+logger = logging.getLogger("logger")
 
 def ensure_dir(directory):
     if not os.path.exists(directory):
@@ -11,35 +15,23 @@ def ensure_dir(directory):
 
     return directory
 
-config = load_json('./env.json')
+members_path = ensure_dir('./output/users/members')
 
-if __name__ == '__main__':
-    ap = argparse.ArgumentParser()
-    ap.add_argument('-u', '--update', help = 'update channels', action="store_true")
-    args = vars(ap.parse_args())
+users_store = {}
+# Put users into the dict
+def save_users(users_array):
+    for user in users_array:
+        # Key user info on their unique user ID
+        user_id = user["id"]
+        # Store the entire user object (you may not need all of the info)
+        users_store[user_id] = user
+    print(users_store)
+    dump_json('{}/members.json'.format(members_path), users_store)
 
-    slack_args = {
-        'presence': 1
-    }
+try:
+    response = client.users_list()
+    save_users(response["members"])
+except SlackApiError as e:
+    logger.error("Error creating conversation: {}".format(e))
 
-    sc = SlackClient(config['token'])
-    response = sc.api_call('users.list', **slack_args)
-    users = response['members']
 
-    for user in users:
-        user_name = user['name']
-        memb_path = ensure_dir('./output/users/members')
-        user_path = '{}/{}.json'.format(memb_path, user_name)
-
-        try:
-            old_json = load_json(user_path)
-            if not args['update']:
-                print('Aready have user {}, skipping...'.format(user_name))
-                continue
-        except Exception as e:
-            old_json = {}
-            print('No existing messages, starting from scratch...')
-
-        print('ADDING ', user_name)
-
-        dump_json(user_path, user)
